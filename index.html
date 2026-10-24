@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bomb Party</title>
+<style>
+/* ---------- Theme: colours live in variables so they're easy to change ---------- */
+:root{--bg:#1b1030;--panel:#2a1a47;--ink:#fff4e0;--muted:#b7a6d6;--fuse:#ffb703;--spark:#ff4d6d;--mint:#7ae7c7;--bomb:#0e0a18}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif;min-height:100vh}
+main{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+h1{font:900 clamp(2rem,8vw,3.4rem)/1 "Arial Black",Impact,sans-serif;margin:.3em 0;color:var(--fuse)}
+.card{background:var(--panel);border-radius:14px;padding:16px;margin:14px 0}
+label{display:block;margin:10px 0 4px;color:var(--muted);font-size:.9rem}
+input,select,textarea,button{font:inherit;border-radius:8px;border:2px solid #4a3578;background:#150b27;color:var(--ink);padding:8px 10px}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:3px solid var(--mint)}
+textarea{width:100%;min-height:60px}
+button{cursor:pointer;background:var(--fuse);color:#2b1700;border:0;font-weight:700}
+button.alt{background:#4a3578;color:var(--ink)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.chip{background:#150b27;border-radius:20px;padding:4px 12px;display:inline-block;margin:3px}
+.hidden{display:none!important}
+/* ---------- Game screen ---------- */
+.players{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.pl{background:var(--panel);border:3px solid transparent;border-radius:12px;padding:6px 12px;text-align:center}
+.pl.turn{border-color:var(--fuse);box-shadow:0 0 14px var(--fuse)}
+.pl.out{opacity:.35;text-decoration:line-through}
+.stage{display:flex;flex-direction:column;align-items:center;margin:18px 0}
+.bomb{width:170px;height:170px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#3d3358,var(--bomb));
+ display:flex;align-items:center;justify-content:center;font:900 3.2rem "Arial Black",sans-serif;position:relative;animation:tick 1s infinite}
+.bomb::before{content:"";position:absolute;top:-26px;left:78px;width:8px;height:34px;background:#8a6a3b;border-radius:4px;transform:rotate(12deg)}
+.bomb::after{content:"✦";position:absolute;top:-44px;left:84px;color:var(--fuse);font-size:1.6rem;animation:spark .3s infinite alternate}
+.bomb.low{color:var(--spark);animation-duration:.4s}
+.bomb.boom{animation:boom .8s forwards}
+@keyframes tick{50%{transform:scale(1.04)}}
+@keyframes spark{to{opacity:.3;transform:scale(1.4)}}
+@keyframes boom{0%{transform:scale(1);background:var(--spark)}40%{transform:scale(1.8);background:var(--fuse);opacity:1}100%{transform:scale(2.4);opacity:0}}
+.chunk{font:900 clamp(3rem,14vw,5.5rem)/1 "Arial Black",sans-serif;color:var(--mint);margin:14px 0 4px;letter-spacing:.05em}
+.typed{min-height:2rem;font-size:1.5rem}
+#msg{min-height:1.5rem;color:var(--spark);font-weight:700}
+#answer{font-size:1.4rem;width:min(100%,360px);text-align:center}
+.used span{display:inline-block;background:#150b27;border-radius:6px;padding:1px 8px;margin:2px;font-size:.9rem}
+@media (prefers-reduced-motion:reduce){.bomb,.bomb::after{animation:none}}
+</style>
+</head>
+<body>
+<main>
+<h1>Bomb Party</h1>
+
+<!-- HOME: choose a nickname, then create a game (online or local) -->
+<section id="home" class="card">
+  <label for="nick">Your nickname</label>
+  <input id="nick" maxlength="14" placeholder="Nickname">
+  <div class="row" style="margin-top:14px">
+    <button id="createBtn">Create online game</button>
+    <button id="localBtn" class="alt">Local game (one keyboard)</button>
+  </div>
+  <p id="homeNote" style="color:var(--muted)"></p>
+</section>
+
+<!-- JOIN: shown when someone opens a link with #roomcode -->
+<section id="join" class="card hidden">
+  <p>You've been invited to a game. Pick a nickname to join.</p>
+  <input id="joinNick" maxlength="14" placeholder="Nickname">
+  <button id="joinBtn">Join game</button>
+  <p id="joinNote" style="color:var(--muted)"></p>
+</section>
+
+<!-- LOBBY -->
+<section id="lobby" class="hidden">
+  <div class="card">
+    <div id="linkBox" class="row hidden">
+      <input id="linkField" readonly style="flex:1;min-width:200px">
+      <button id="copyBtn">Copy link</button>
+    </div>
+    <h3>Players</h3><div id="roster"></div>
+    <div id="addLocal" class="row hidden" style="margin-top:10px">
+      <input id="localName" maxlength="14" placeholder="Add player on this keyboard">
+      <button id="addLocalBtn" class="alt">Add</button>
+    </div>
+    <p id="guestInfo" class="hidden" style="color:var(--muted)"></p>
+  </div>
+
+  <!-- Host-only settings -->
+  <div id="settings" class="card hidden">
+    <h3>Settings</h3>
+    <div class="grid">
+      <div><label>Language</label>
+        <select id="sLang"><option value="en">English</option><option value="es">Spanish</option><option value="sp">Spanglish</option></select></div>
+      <div><label>Word list</label>
+        <select id="sMode"><option value="builtin">Built-in only</option><option value="both">Built-in + my words</option><option value="custom">Only my words</option></select></div>
+      <div><label>Lives (1-5)</label><input id="sLives" type="number" min="1" max="5" value="3"></div>
+      <div><label>Timer seconds (5-20)</label><input id="sTimer" type="number" min="5" max="20" value="10"></div>
+      <div><label>Chunk length</label>
+        <select id="sChunk"><option value="2">2 letters</option><option value="3">3 letters</option><option value="mixed">Mixed</option></select></div>
+    </div>
+    <label>My custom words (one per line or comma-separated)</label>
+    <textarea id="sCustom"></textarea>
+    <input type="file" id="sFile" accept=".txt">
+    <label>Banned words</label>
+    <textarea id="sBanned"></textarea>
+    <p id="count" style="color:var(--mint)"></p>
+    <button id="startBtn">Start game</button>
+  </div>
+</section>
+
+<!-- GAME -->
+<section id="game" class="hidden">
+  <div id="plist" class="players"></div>
+  <div class="stage">
+    <div id="bomb" class="bomb">10</div>
+    <div id="chunk" class="chunk"></div>
+    <div id="typed" class="typed"></div>
+    <input id="answer" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Type a word, press Enter">
+    <div id="msg"></div>
+  </div>
+  <div id="over" class="card hidden" style="text-align:center">
+    <h2 id="winner"></h2>
+    <button id="againBtn">Play again</button>
+  </div>
+  <div class="card used"><b>Used words</b><div id="used"></div></div>
+</section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+"use strict";
+/* =====================================================================
+   1. WORD LISTS  (each language is its own Set)
+   These are SMALL starter lists. To use bigger ones, replace the strings
+   below, or paste/upload a word file in the lobby ("My custom words").
+   ===================================================================== */
+const EN = new Set(`running jumping singing painting morning evening building reading writing cooking walking talking thinking dancing swimming driving drinking sleeping working playing laughing learning feeling nothing something everything anything king ring spring string bring thing wing sing station nation action motion question mention education attention direction collection connection information imagination celebration situation conversation vacation relation creation solution position condition tradition addition competition permission decision television explosion complete computer monster winter summer water butter letter better paper dinner number remember member wonder thunder under over river silver mirror minor error terror horror door floor poor order border corner marker market garden harbor bright night light flight fight right sight tight might height weight eight eighty straight daughter caught taught thought brought bought through enough tough laugh rough cough green queen screen teen between sixteen canteen orange strange change range danger stranger angle jungle bundle candle handle table able stable trouble double bubble cable couple people simple little middle riddle puzzle battle bottle kettle settle gentle castle whistle crystal metal mental rental dental animal normal formal journal final signal local social special official crucial racial brave grave grape grass great trade track trace crack crash drama drain train brain tray crazy cream dream scream stream team beach teach reach each peach speech breath health wealth stealth heart start party smart chart apart garbage language message package passage average damage image manage marriage village voyage ghost host most post coast toast roast boat coat goat float throat road toad load soap soup group youth south mouth couple country county town brown crown clown drown flower power tower shower coward pirate private rotate rocket pocket socket jacket basket blanket ticket planet magnet signature picture nature future culture creature feature mixture adventure measure treasure pleasure leisure pasta pizza banana drama camera opera cinema energy enemy memory story factory history victory library secretary ordinary vocabulary rabbit habit visit limit spirit pretty city kitty candy sunny funny honey money monkey turkey hockey jersey kidney donkey cherry berry merry carry marry worry hurry bakery battery pottery`.split(/\s+/));
+
+const ES = new Set(`canción nación estación acción educación información atención dirección relación situación conversación celebración imaginación solución posición condición tradición decisión televisión explosión pasión misión visión versión conclusión discusión queso quedar quemar esquina paquete mosquito pequeño tequila máquina banquete bosque parque quien química raqueta toque ataque chiquito maquillaje niño año montaña señal español otoño baño sueño compañía enseñar cumpleaños diseño extraño mañana leña caña araña cabaña campaña dueño pañuelo señor señora ñoño camión corazón razón avión limón melón balcón camarón canalón jabón botón pantalón patrón perdón ratón salón sillón sazón tentación aviación casa cosa mesa silla perro gato pájaro pescado caballo vaca toro cerdo oveja gallina pollo pato conejo ratón tortuga serpiente mariposa abeja hormiga araña elefante jirafa mono tigre león oso lobo zorro ciudad pueblo calle camino carretera puente plaza parque jardín huerto bosque montaña río mar playa isla desierto selva cielo estrella luna sol nube lluvia viento tormenta nieve fuego tierra agua trabajo escuela colegio universidad maestro maestra alumno estudiante lectura escritura palabra frase libro cuaderno lápiz papel pluma bolígrafo cantar bailar correr saltar caminar hablar escuchar mirar comer beber dormir despertar levantar sentar estudiar aprender enseñar jugar trabajar descansar viajar cocinar limpiar lavar comprar vender pagar abrir cerrar empezar terminar pensar recordar olvidar entender conocer querer amar odiar reír llorar sonreír felicidad tristeza alegría amistad familia hermano hermana padre madre abuelo abuela primo tío tía amigo amiga vecino vecina rojo azul verde amarillo naranja morado negro blanco gris rosado grande pequeño bonito feo rápido lento fuerte débil joven viejo nuevo antiguo bueno malo mejor peor siempre nunca ahora luego después antes mañana ayer hoy aquí allí cerca lejos arriba abajo adelante atrás dentro fuera pronto tarde temprano mientras durante entonces porque aunque sino pues cuando donde como`.split(/\s+/));
+
+const SPANGLISH = new Set(`parquear lonche troca bufete chequear textear washateria janguear marqueta rufo carpeta yarda bil breik craquear dompear emailear fainal flonquear guachar huachar lonchera mapear mopear ponchar printear rentar sanwich suiche taipear tickete trokero yonque zipear escanear clickear googlear guglear liquear hanguear overtaim lonchear`.split(/\s+/));
+
+/* =====================================================================
+   2. WORD HELPERS
+   ===================================================================== */
+// Lowercase and strip accents, but keep ñ as its own letter.
+const strip = w => w.toLowerCase().replace(/ñ/g, "\u0001").normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "").replace(/\u0001/g, "ñ").trim();
+const parse = t => t.split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
+
+// Build the ACTIVE list from the host's settings: Map(normalizedWord -> display word)
+function buildList(s) {
+  const base = s.lang === "en" ? EN : s.lang === "es" ? ES : new Set([...EN, ...ES, ...SPANGLISH]);
+  const custom = parse(s.custom);
+  const src = s.mode === "builtin" ? [...base] : s.mode === "both" ? [...base, ...custom] : custom;
+  const banned = new Set(parse(s.banned).map(strip));
+  const map = new Map();
+  for (const w of src) {
+    const n = strip(w);
+    if (/^[a-zñ]{2,}$/.test(n) && !banned.has(n) && !map.has(n)) map.set(n, w.toLowerCase());
+  }
+  return map;
+}
+
+// Pick a chunk that appears in several unused words, so it's never impossible.
+function pickChunk(list, s, used) {
+  const len = s.chunk === "mixed" ? (Math.random() < .5 ? 2 : 3) : +s.chunk;
+  const counts = {};
+  for (const n of list.keys()) {
+    if (used.has(n)) continue;
+    const seen = new Set();
+    for (let i = 0; i + len <= n.length; i++) {
+      const c = n.substr(i, len);
+      if (!seen.has(c)) { seen.add(c); counts[c] = (counts[c] || 0) + 1; }
+    }
+  }
+  const min = list.size > 1500 ? 3 : 2;           // small lists need a lower bar
+  let ok = Object.keys(counts).filter(c => counts[c] >= min);
+  if (!ok.length) ok = Object.keys(counts);
+  return ok.length ? ok[Math.floor(Math.random() * ok.length)] : null;
+}
+
+/* =====================================================================
+   3. STATE
+   The HOST owns the game state `G`. Guests only display what they receive.
+   ===================================================================== */
+const $ = s => document.querySelector(s);
+let isHost = false, peer = null, hostConn = null, conns = {}, myId = null;
+let G = null, list = new Map(), usedSet = new Set(), timer = null;
+let view = null, lastRound = -1;
+
+function newGame() {
+  return { phase: "lobby", players: [], turn: -1, chunk: "", used: [], typing: "", msg: "", rounds: 0, winner: "",
+    settings: { lang: "en", mode: "builtin", custom: "", banned: "", lives: 3, timer: 10, chunk: "2" } };
+}
+
+/* =====================================================================
+   4. HOST GAME LOGIC (timer, chunks, validation, lives)
+   ===================================================================== */
+function pushState() {                                   // send state to everyone (and draw it ourselves)
+  const s = { ...G, left: Math.max(0, (G.end || 0) - Date.now()) };
+  render(s);
+  Object.values(conns).forEach(c => c.open && c.send({ t: "state", s }));
+}
+
+function startGame() {
+  list = buildList(G.settings);
+  if (list.size < 10) return alert("The active word list is too small (need at least 10 words).");
+  usedSet = new Set(); G.used = []; G.turn = -1; G.rounds = 0; G.winner = "";
+  G.players.forEach(p => p.lives = G.settings.lives);
+  nextTurn();
+}
+
+function nextTurn() {
+  const alive = G.players.filter(p => p.lives > 0);
+  if (alive.length <= 1) return finish(alive[0] ? alive[0].name + " wins!" : "Nobody wins");
+  do { G.turn = (G.turn + 1) % G.players.length; } while (G.players[G.turn].lives < 1);
+  G.chunk = pickChunk(list, G.settings, usedSet);
+  if (!G.chunk) return finish("The word list ran out!");
+  G.phase = "play"; G.typing = ""; G.msg = ""; G.rounds++;
+  const ms = G.settings.timer * 1000;
+  G.end = Date.now() + ms;
+  clearTimeout(timer); timer = setTimeout(explode, ms);
+  pushState();
+}
+
+function finish(text) { clearTimeout(timer); G.phase = "over"; G.winner = text; G.end = 0; pushState(); }
+
+function explode() {                                     // timer hit 0
+  const p = G.players[G.turn];
+  p.lives--; G.phase = "boom"; G.end = 0; G.msg = p.name + " blew up!";
+  pushState();
+  timer = setTimeout(nextTurn, 1500);
+}
+
+function submit(pid, word) {                             // validate a typed word
+  if (!G || G.phase !== "play" || G.players[G.turn].id !== pid) return;
+  const n = strip(word);
+  let err = "";
+  if (!n.includes(G.chunk)) err = `Word must contain "${G.chunk}"`;
+  else if (usedSet.has(n)) err = "Already used";
+  else if (!list.has(n)) err = "Not in the word list";
+  if (err) { G.msg = err; return pushState(); }
+  usedSet.add(n); G.used.push(list.get(n));
+  clearTimeout(timer); nextTurn();
+}
+
+function dropPlayer(id) {                                // disconnect: remove player, game goes on
+  const i = G.players.findIndex(p => p.id === id);
+  if (i < 0) return;
+  G.players.splice(i, 1); delete conns[id];
+  if (G.phase === "lobby") return pushState();
+  if (i < G.turn) G.turn--;
+  else if (i === G.turn) { G.turn--; clearTimeout(timer); nextTurn(); return; }
+  pushState();
+}
+
+function toLobby() { clearTimeout(timer); G.phase = "lobby"; G.end = 0; pushState(); }
+
+/* =====================================================================
+   5. NETWORKING (PeerJS, peer-to-peer; the room code is the host's peer id)
+   ===================================================================== */
+const rand = () => Math.random().toString(36).slice(2, 8);
+const nick = el => (el.value.trim() || "Player").slice(0, 14);
+
+function hostGame(online) {
+  isHost = true; myId = "host"; G = newGame();
+  G.players.push({ id: "host", name: nick($("#nick")), lives: 0 });
+  showOnly("lobby"); initSettings(); pushState();
+  if (!online) return;
+  if (typeof Peer === "undefined") { $("#guestInfo").textContent = "PeerJS could not load, so online play is off. Local mode still works."; $("#guestInfo").classList.remove("hidden"); return; }
+  const code = rand();
+  peer = new Peer("bombparty-" + code);
+  peer.on("open", () => {
+    $("#linkField").value = location.href.split("#")[0] + "#" + code;
+    $("#linkBox").classList.remove("hidden");
+  });
+  peer.on("error", e => alert("Connection problem: " + e.type));
+  peer.on("connection", c => {
+    c.on("data", d => {
+      if (d.t === "join") {
+        if (G.phase !== "lobby") return c.send({ t: "full" });
+        conns[c.peer] = c;
+        G.players.push({ id: c.peer, name: String(d.name).slice(0, 14), lives: 0 });
+        pushState();
+      } else if (d.t === "word") submit(c.peer, String(d.w));
+      else if (d.t === "typing" && G.phase === "play" && G.players[G.turn].id === c.peer) {
+        G.typing = String(d.w).slice(0, 30); G.msg = ""; pushState();
+      }
+    });
+    c.on("close", () => dropPlayer(c.peer));
+  });
+}
+
+function joinGame(code) {
+  if (typeof Peer === "undefined") return $("#joinNote").textContent = "PeerJS could not load.";
+  $("#joinNote").textContent = "Connecting...";
+  peer = new Peer();
+  peer.on("open", id => {
+    myId = id;
+    hostConn = peer.connect("bombparty-" + code);
+    hostConn.on("open", () => hostConn.send({ t: "join", name: nick($("#joinNick")) }));
+    hostConn.on("data", d => { if (d.t === "state") { showOnly(d.s.phase === "lobby" ? "lobby" : "game"); render(d.s); } else if (d.t === "full") $("#joinNote").textContent = "That game already started."; });
+    hostConn.on("close", () => alert("The host left the game."));
+  });
+  peer.on("error", e => $("#joinNote").textContent = "Could not connect (" + e.type + ")");
+}
+
+/* =====================================================================
+   6. RENDERING (runs on the host AND on guests, from the same state)
+   ===================================================================== */
+function showOnly(id) { ["home", "join", "lobby", "game"].forEach(x => $("#" + x).classList.toggle("hidden", x !== id)); }
+const canType = id => isHost ? (id === "host" || id[0] === "L") : id === myId;
+
+function render(s) {
+  view = s; if (s.phase === "play") view.endLocal = Date.now() + s.left;
+  showOnly(s.phase === "lobby" ? "lobby" : "game");
+  if (s.phase === "lobby") {
+    $("#roster").innerHTML = s.players.map(p => `<span class="chip">${esc(p.name)}</span>`).join("");
+    $("#settings").classList.toggle("hidden", !isHost);
+    $("#addLocal").classList.toggle("hidden", !isHost);
+    if (!isHost) { $("#guestInfo").textContent = "Waiting for the host to start..."; $("#guestInfo").classList.remove("hidden"); }
+    return;
+  }
+  const cur = s.players[s.turn];
+  $("#plist").innerHTML = s.players.map((p, i) =>
+    `<div class="pl ${i === s.turn && s.phase === "play" ? "turn" : ""} ${p.lives < 1 ? "out" : ""}">${esc(p.name)}<br>${"❤️".repeat(Math.max(0, p.lives)) || "💀"}</div>`).join("");
+  $("#chunk").textContent = s.phase === "over" ? "" : s.chunk.toUpperCase();
+  $("#typed").textContent = s.phase === "play" && cur && !canType(cur.id) ? s.typing : "";
+  $("#msg").textContent = s.msg;
+  $("#used").innerHTML = s.used.map(w => `<span>${esc(w)}</span>`).join("");
+  $("#bomb").classList.toggle("boom", s.phase === "boom");
+  const mine = s.phase === "play" && cur && canType(cur.id);
+  $("#answer").classList.toggle("hidden", !mine);
+  if (mine && lastRound !== s.rounds) { $("#answer").value = ""; $("#answer").focus(); }
+  lastRound = s.rounds;
+  $("#over").classList.toggle("hidden", s.phase !== "over");
+  $("#winner").textContent = s.winner;
+  $("#againBtn").classList.toggle("hidden", !isHost);
+}
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// Countdown on the bomb: guests count down locally from the time left the host sent.
+setInterval(() => {
+  if (!view || view.phase !== "play") return;
+  const left = Math.max(0, view.endLocal - Date.now());
+  $("#bomb").textContent = Math.ceil(left / 1000);
+  $("#bomb").classList.toggle("low", left < 3000);
+}, 100);
+
+/* =====================================================================
+   7. LOBBY SETTINGS + BUTTONS
+   ===================================================================== */
+function initSettings() {
+  const ids = { sLang: "lang", sMode: "mode", sLives: "lives", sTimer: "timer", sChunk: "chunk", sCustom: "custom", sBanned: "banned" };
+  const sync = () => {
+    const s = G.settings;
+    for (const [el, key] of Object.entries(ids)) s[key] = $("#" + el).value;
+    s.lives = Math.min(5, Math.max(1, +s.lives || 3)); s.timer = Math.min(20, Math.max(5, +s.timer || 10));
+    const n = buildList(s).size;
+    $("#count").textContent = `Active words: ${n}` + (n < 10 ? " - too small to play!" : n < 1500 ? " - small list: chunks may repeat often." : "");
+  };
+  Object.keys(ids).forEach(el => $("#" + el).addEventListener("input", sync));
+  $("#sFile").addEventListener("change", async e => {   // upload a .txt word list
+    const f = e.target.files[0]; if (!f) return;
+    $("#sCustom").value += "\n" + await f.text(); sync();
+  });
+  sync();
+}
+
+$("#createBtn").onclick = () => hostGame(true);
+$("#localBtn").onclick = () => hostGame(false);
+$("#startBtn").onclick = startGame;
+$("#againBtn").onclick = toLobby;
+$("#copyBtn").onclick = () => { $("#linkField").select(); navigator.clipboard?.writeText($("#linkField").value); $("#copyBtn").textContent = "Copied!"; };
+$("#joinBtn").onclick = () => joinGame(location.hash.slice(1));
+$("#addLocalBtn").onclick = () => {
+  const name = $("#localName").value.trim(); if (!name) return;
+  G.players.push({ id: "L" + rand(), name: name.slice(0, 14), lives: 0 }); $("#localName").value = ""; pushState();
+};
+
+// Typing and submitting words
+$("#answer").addEventListener("input", e => {
+  if (isHost) { G.typing = e.target.value; G.msg = ""; pushState(); }
+  else hostConn.send({ t: "typing", w: e.target.value });
+});
+$("#answer").addEventListener("keydown", e => {
+  if (e.key !== "Enter" || !e.target.value.trim()) return;
+  const w = e.target.value.trim(); e.target.value = "";
+  if (isHost) submit(G.players[G.turn].id, w); else hostConn.send({ t: "word", w });
+});
+
+// If the URL has #roomcode, show the join screen instead of the home screen.
+if (location.hash.length > 1) showOnly("join");
+</script>
+</body>
+</html>
